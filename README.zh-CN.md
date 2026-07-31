@@ -6,6 +6,8 @@
 "系统空闲时长"判断在线状态的程序 —— 大多数人是为了 Microsoft Teams ——
 保持在线。
 
+<img src="docs/screenshot-zh-CN.png" alt="Mouse Keeper 的托盘面板" width="360">
+
 - 纯 `ctypes` 调用 Win32 API，不依赖 pyautogui / pynput 等自动化库
 - 两种模式：**智能**（只在你真的离开时才动）/ **始终**（到点就动）
 - 顺带阻止息屏与睡眠

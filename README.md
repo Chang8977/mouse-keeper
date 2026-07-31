@@ -7,6 +7,8 @@ still at the keyboard, so apps that derive presence from the system idle timer â
 Microsoft Teams being the usual reason people want this â€” stay marked as
 available.
 
+<img src="docs/screenshot-en.png" alt="Mouse Keeper's tray panel" width="360">
+
 - Pure `ctypes` calls into Win32. No pyautogui, no pynput, no automation stack.
 - Two modes: **Smart** (only moves when you have actually stepped away) and
   **Always** (moves on a fixed interval).

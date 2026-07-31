@@ -6,6 +6,8 @@
 前にいると Windows に思わせることで、システムのアイドル時間から在席状態を判断する
 アプリ —— たいていの人にとっては Microsoft Teams —— を「連絡可能」のままに保ちます。
 
+<img src="docs/screenshot-ja.png" alt="Mouse Keeper のトレイ パネル" width="360">
+
 - Win32 API を `ctypes` で直接呼ぶだけ。pyautogui も pynput も使いません
 - 2 つのモード：**スマート**（本当に離席したときだけ動かす）/ **常時**（一定間隔で動かす）
 - 画面オフとスリープも同時に防ぎます
