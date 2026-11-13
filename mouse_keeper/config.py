@@ -61,6 +61,8 @@ class Config:
     schedule_end: str = schedule.DEFAULT_END
     #: Look for a newer release on GitHub (once at startup, then daily)
     check_updates: bool = True
+    #: Last time picked in the panel's "Pause until" row ("HH:MM")
+    pause_until: str = schedule.DEFAULT_PAUSE_UNTIL
     #: Start keeping alive immediately on launch
     start_active: bool = True
     #: Write a log file
@@ -89,6 +91,8 @@ class Config:
         self.schedule_end = schedule.fmt_hhmm(
             schedule.parse_hhmm(self.schedule_end, schedule.DEFAULT_END))
         self.check_updates = bool(self.check_updates)
+        self.pause_until = schedule.fmt_hhmm(
+            schedule.parse_hhmm(self.pause_until, schedule.DEFAULT_PAUSE_UNTIL))
         if self.language != "auto" and self.language not in LANGUAGES:
             self.language = "auto"
 

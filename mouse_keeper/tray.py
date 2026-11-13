@@ -15,6 +15,7 @@ import tempfile
 import time
 import tkinter as tk
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 
 from . import APP_NAME, __version__, autostart, i18n, icon as icon_art, schedule, winapi, winui
@@ -187,9 +188,10 @@ class App:
         elif self.engine.active:
             self._auto_stop_notified = False
 
-        event, self.engine.stats.schedule_event = self.engine.stats.schedule_event, ""
+        event, self.engine.stats.event = self.engine.stats.event, ""
         if event:
-            self._notify(t("notify_schedule_on") if event == "on" else t("notify_schedule_off"))
+            self._notify({"on": t("notify_schedule_on"), "off": t("notify_schedule_off"),
+                          "resume": t("notify_resumed")}[event])
 
         update = self._update
         if update and update[0] != self._update_notified:
@@ -218,6 +220,7 @@ class App:
     def _on_right_click(self) -> None:
         # Always start on the main page rather than wherever we were left
         self._page = "main"
+        self._freshen_pause_time()
         # The message window has to come to the foreground first, otherwise the
         # popup cannot take focus and will never get the FocusOut that dismisses
         # it when you click elsewhere.
@@ -245,6 +248,10 @@ class App:
                  state=self.engine.state,
                  action=self._toggle_active),
             separator(),
+            Item(kind="segmented", text=lambda: t("row_pause_until"),
+                 options=self._pause_options,
+                 value=lambda: "go" if self.engine.stats.resume_at else None,
+                 on_select=self._on_pause_row),
             Item(kind="segmented", text=lambda: t("row_mode"),
                  options=[(t("opt_smart"), MODE_SMART), (t("opt_force"), MODE_FORCE)],
                  value=lambda: self.config.mode, on_select=self._set_mode),
@@ -314,6 +321,12 @@ class App:
             Item(kind="label", text=lambda: t("label_schedule_hint")),
         ]
 
+    def _pause_options(self) -> list[tuple[str, object]]:
+        step = schedule.PAUSE_STEP_MINUTES
+        timed = self.engine.stats.resume_at is not None
+        go = t("opt_resume_now") if timed else t("opt_pause")
+        return [("−", -step), (self.config.pause_until, None), ("+", step), (go, "go")]
+
     def _schedule_summary(self) -> str:
         c = self.config
         if not c.schedule_enabled:
@@ -367,6 +380,34 @@ class App:
             self._page = page
             self._rebuild_panel()
         return handler
+
+    # -- Pause until ----------------------------------------------------
+    def _freshen_pause_time(self) -> None:
+        """If the remembered time has already gone by today, offer one shortly
+        ahead instead -- otherwise a quick click would pause until tomorrow."""
+        if self.engine.stats.resume_at is not None:
+            return
+        now = datetime.now()
+        if schedule.next_occurrence(self.config.pause_until, now).date() != now.date():
+            self.config.pause_until = schedule.suggest_resume(now)
+
+    def _on_pause_row(self, value) -> None:
+        if value == "go":
+            if self.engine.stats.resume_at is not None:
+                self.engine.set_active(True)          # "Resume now"
+            else:
+                when = schedule.next_occurrence(self.config.pause_until, datetime.now())
+                self.engine.pause_until(when)
+                self._notify(t("notify_paused_until", when=self.engine.when_text(when)))
+            self._after_change(save=True)
+            return
+        self.config.pause_until = schedule.shift(self.config.pause_until, value,
+                                                 schedule.DEFAULT_PAUSE_UNTIL)
+        if self.engine.stats.resume_at is not None:
+            # Adjusting while a timed pause runs moves its end
+            self.engine.pause_until(
+                schedule.next_occurrence(self.config.pause_until, datetime.now()))
+        self._after_change(save=True)
 
     # -- Work hours -------------------------------------------------------
     def _schedule_edited(self) -> None:

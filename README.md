@@ -14,6 +14,7 @@ this — keep you green instead of switching you to "Away".
 - The cursor does not visibly move, so it never gets in the way of your work.
 - Also keeps the screen on and stops the PC from going to sleep.
 - **Work hours**: switch on and off automatically, e.g. Mon–Fri 09:00–18:00.
+- **Pause until**: take a break and have it resume by itself at a set time, e.g. 13:30.
 - Pauses itself while the PC is locked and resumes when you unlock.
 - Recovers on its own after sleep.
 - Global hotkey to pause / resume, which you can change from the panel.
@@ -59,6 +60,7 @@ Right-click the tray icon to open the panel shown in the screenshot above:
 | Item | What it does |
 |---|---|
 | Status card | Shows running / paused / locked, or "Off hours" with the next start time. Click to start or pause |
+| Pause until | Set a time with − / + and click **Pause**; it resumes by itself at that time (see below) |
 | Mode | Smart / Always (see above) |
 | Interval | 30 / 45 / 60 / 90 / 120 / 180 seconds |
 | Auto-stop | Stops by itself after 2 / 4 / 8 / 12 hours and lets you know. Off = never |
@@ -76,6 +78,17 @@ Changing a setting keeps the panel open, so you can adjust several in a row.
 
 The tray icon shows the current state: **green arrow** (running), **grey pause**
 (paused), **amber padlock** (PC locked).
+
+### Pause until
+
+Going to lunch? Set the time on the **Pause until** row (− / + move it by 15
+minutes) and click **Pause**. Mouse Keeper pauses right away and resumes by
+itself at that time, with a notification. While paused, the button changes to
+**Resume now** if you are back early. If the time has already passed today, it
+means tomorrow.
+
+Starting or pausing by hand, or with the hotkey, cancels the timer. If your work
+hours end during the pause, it stays off for the evening.
 
 ### Hotkey
 
@@ -130,6 +143,7 @@ restart Mouse Keeper afterwards.
 | `schedule_start` | `"09:00"` | Work hours begin (`HH:MM`) |
 | `schedule_end` | `"18:00"` | Work hours end; earlier than the start = past midnight |
 | `check_updates` | `true` | Look for new versions |
+| `pause_until` | `"13:30"` | Last time chosen in the Pause until row |
 | `start_active` | `true` | Start keeping you active right after launch (ignored while work hours are on) |
 | `log_enabled` | `false` | Write a log file |
 

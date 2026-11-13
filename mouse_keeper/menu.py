@@ -88,13 +88,18 @@ class Item:
     state: Callable[[], str] | None = None
     detail: Callable[[], str] | None = None
 
-    # segmented only
-    options: list[tuple[str, Any]] = field(default_factory=list)
+    # segmented only. May also be a callable returning the list, for chips
+    # whose labels change while the panel is open.
+    options: list[tuple[str, Any]] | Callable[[], list[tuple[str, Any]]] = \
+        field(default_factory=list)
     value: Callable[[], Any] | None = None
     on_select: Callable[[Any], None] | None = None
 
     def resolve_text(self) -> str:
         return self.text() if callable(self.text) else self.text
+
+    def resolve_options(self) -> list[tuple[str, Any]]:
+        return self.options() if callable(self.options) else self.options
 
     def is_checked(self) -> bool:
         return bool(self.checked and self.checked())
@@ -205,7 +210,7 @@ class Panel:
     def _chips_width(self, item: Item) -> int:
         m = self.menu
         total = 0
-        for label, _v in item.options:
+        for label, _v in item.resolve_options():
             total += m.font_small.measure(label) + 2 * m.px(CHIP_PAD_X) + m.px(CHIP_GAP)
         return total - m.px(CHIP_GAP) if total else 0
 
@@ -220,7 +225,7 @@ class Panel:
                         it.detail() if it.detail else None,
                         it.state() if it.state else None,
                         _freeze(it.value()) if it.value else None,
-                        tuple(label for label, _v in it.options),
+                        tuple(label for label, _v in it.resolve_options()),
                         it.is_checked()))
         return tuple(sig)
 
@@ -339,7 +344,7 @@ class Panel:
         multi = isinstance(current, (set, frozenset, tuple, list))
         chip_h = m.px(20)
         cy0, cy1 = mid - chip_h // 2, mid + chip_h // 2
-        for label, value in it.options:
+        for label, value in it.resolve_options():
             w = m.font_small.measure(label) + 2 * m.px(CHIP_PAD_X)
             if value is None:
                 # Display-only: the readout of a stepper

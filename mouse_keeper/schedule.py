@@ -94,6 +94,28 @@ def next_start(days, start: str, now: datetime) -> datetime | None:
     return None
 
 
+#: Step of the -/+ buttons of "Pause until"
+PAUSE_STEP_MINUTES = 15
+DEFAULT_PAUSE_UNTIL = "13:30"
+
+
+def next_occurrence(hhmm: str, now: datetime) -> datetime:
+    """The next time the clock shows ``hhmm``: later today, or tomorrow if that
+    moment has already passed (or is right now)."""
+    m = parse_hhmm(hhmm, DEFAULT_PAUSE_UNTIL)
+    cand = now.replace(hour=m // 60, minute=m % 60, second=0, microsecond=0)
+    return cand if cand > now else cand + timedelta(days=1)
+
+
+def suggest_resume(now: datetime, ahead_minutes: int = 30,
+                   step: int = PAUSE_STEP_MINUTES) -> str:
+    """A sensible default resume time: at least ``ahead_minutes`` from now,
+    rounded up to the step grid (12:07 -> 12:45 with the defaults)."""
+    m = now.hour * 60 + now.minute + ahead_minutes
+    m = -(-m // step) * step
+    return fmt_hhmm(m)
+
+
 def summarize_days(days, labels: list[str]) -> str:
     """[0,1,2,3,4] -> 'Mo–Fr' using the language's short day labels.
 

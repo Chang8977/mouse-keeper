@@ -46,9 +46,12 @@ class Stats:
     stalls: int = 0              # how many freeze/wake events were detected
     blocked: bool = False        # currently unable to inject (locked session)
     off_hours: bool = False      # paused because the work-hours window closed
-    #: "on" / "off" when the schedule just switched keep-alive; the UI consumes
-    #: it (resets it to "") to show a notification exactly once.
-    schedule_event: str = ""
+    #: When a timed pause ("pause until 13:30") ends; None when there is none
+    resume_at: datetime | None = None
+    #: Something the engine switched by itself that deserves a notification:
+    #: "on" / "off" (work hours began / ended) or "resume" (a timed pause
+    #: ended). The UI consumes it -- resets it to "" -- so it shows exactly once.
+    event: str = ""
 
     @property
     def active_seconds(self) -> float:
@@ -106,9 +109,10 @@ class Engine:
             if value == self._active:
                 return
             self._active = value
-            # Any explicit change -- user, hotkey or schedule -- ends "off hours";
-            # the schedule sets it again itself when it is the one pausing.
+            # Any explicit change -- user, hotkey or schedule -- ends "off hours"
+            # and cancels a timed pause; whoever is pausing sets them again.
             self.stats.off_hours = False
+            self.stats.resume_at = None
             if value:
                 self.stats.started_at = time.time()
                 self.stats.auto_stopped = False
@@ -125,6 +129,18 @@ class Engine:
     def toggle(self) -> bool:
         self.set_active(not self._active)
         return self._active
+
+    def pause_until(self, when: datetime) -> None:
+        """Pause now and switch back on by itself at ``when``.
+
+        Calling it again while already paused just moves the resume time.
+        """
+        self.set_active(False)
+        self.stats.resume_at = when
+        self.stats.off_hours = False
+        self.stats.auto_stopped = False
+        self._log(f"paused until {when:%Y-%m-%d %H:%M}")
+        self._on_change()
 
     def schedule_changed(self) -> None:
         """Settings of the schedule changed: re-apply it on the next tick.
@@ -155,6 +171,8 @@ class Engine:
     def status_text(self) -> str:
         """The detail line on the status card."""
         if not self._active:
+            if self.stats.resume_at is not None:
+                return t("detail_resume_at", when=self.when_text(self.stats.resume_at))
             if self.stats.off_hours:
                 when = self.next_start_text()
                 return t("detail_next_start", when=when) if when else t("detail_start")
@@ -209,15 +227,30 @@ class Engine:
         self._on_change()
 
     def next_start_text(self) -> str:
-        """'09:00' if the next window opens today, else 'Mo 09:00'."""
-        now = datetime.now()
-        nxt = schedule.next_start(self.config.schedule_days, self.config.schedule_start, now)
-        if nxt is None:
-            return ""
-        hhmm = nxt.strftime("%H:%M")
-        if nxt.date() == now.date():
+        """When the next work-hours window opens, see when_text."""
+        nxt = schedule.next_start(self.config.schedule_days, self.config.schedule_start,
+                                  datetime.now())
+        return self.when_text(nxt) if nxt else ""
+
+    @staticmethod
+    def when_text(when: datetime) -> str:
+        """'13:30' if it is today, else with the weekday: 'Mo 13:30'."""
+        hhmm = when.strftime("%H:%M")
+        if when.date() == datetime.now().date():
             return hhmm
-        return f"{t('days_short').split()[nxt.weekday()]} {hhmm}"
+        return f"{t('days_short').split()[when.weekday()]} {hhmm}"
+
+    def _check_resume(self) -> None:
+        """End a timed pause once its time has come. Comparing against the
+        clock (rather than counting down) also covers waking from sleep after
+        the resume time has passed."""
+        when = self.stats.resume_at
+        if when is None or self._active or datetime.now() < when:
+            return
+        self._log("timed pause over, keep-alive on")
+        self.set_active(True)
+        self.stats.event = "resume"
+        self._on_change()
 
     def _inside_now(self) -> bool:
         c = self.config
@@ -242,18 +275,23 @@ class Engine:
         if inside and not self._active:
             self._log("work hours started, keep-alive on")
             self.set_active(True)
-            self.stats.schedule_event = "on"
+            self.stats.event = "on"
         elif not inside and self._active:
             self._log("work hours over, keep-alive paused")
             self.set_active(False)
             self.stats.off_hours = True
-            self.stats.schedule_event = "off"
+            self.stats.event = "off"
         elif not inside:
+            # Already paused when work hours end -- e.g. still on a lunch-style
+            # timed pause. The end of the day wins: drop the pending resume so
+            # it does not switch back on in the evening.
             self.stats.off_hours = True
+            self.stats.resume_at = None
         self._on_change()
 
     def _tick(self) -> None:
         self._check_schedule()
+        self._check_resume()
         if not self._active:
             if self._awake_asserted:
                 winapi.release_awake()
