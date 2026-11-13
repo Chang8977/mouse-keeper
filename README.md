@@ -58,29 +58,7 @@ source code, so the download matches what is in this repository.
 
 ### The panel
 
-Right-click the tray icon:
-
-```
-┌──────────────────────────────────────┐
-│  ●  Running                          │  ← click to start / pause
-│     Up 12m · 8 moves · idle 23s      │
-├──────────────────────────────────────┤
-│  Mode                [Smart] Always  │
-│  Interval · sec  30 45 [60] 90 120   │
-│  Auto-stop · hours  Off 2 4 [8] 12   │
-│  ✓ Work hours · Mo–Fr 09:00–18:00    │
-│  ✓ Also block screen-off / sleep     │
-├──────────────────────────────────────┤
-│    Start with Windows                │
-│    Hotkey · Ctrl+Alt+F12             │
-│  ✓ Check for updates                 │
-│    Write log file                    │
-│    Language · English                │
-│    Open config folder                │
-├──────────────────────────────────────┤
-│    Quit                              │
-└──────────────────────────────────────┘
-```
+Right-click the tray icon to open the panel shown in the screenshot above:
 
 | Item | What it does |
 |---|---|
