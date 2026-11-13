@@ -35,11 +35,7 @@ this — keep you green instead of switching you to "Away".
 No installer and no admin rights are needed. If you move the program later,
 move the whole `MouseKeeper` folder, not just the exe.
 
-> **"Windows protected your PC"?** The program is not code-signed, so on first
-> launch Microsoft Defender SmartScreen may show this warning. It appears for any
-> download that is new and not yet widely used, not because of anything the
-> program does. Click **More info → Run anyway**. If you would rather not, you can
-> build it yourself from source (below).
+> **See "Windows protected your PC"?** Click **More info**, then **Run anyway**.
 
 Release builds are produced automatically by GitHub Actions from the published
 source code, so the download matches what is in this repository.
