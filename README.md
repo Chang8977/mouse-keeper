@@ -1,6 +1,6 @@
 # Mouse Keeper
 
-**English** · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
+**English** · [<span lang="zh-CN">简体中文</span>](README.zh-CN.md) · [<span lang="ja">日本語</span>](README.ja.md)
 
 A small Windows tray tool that keeps you showing as available. It makes Windows
 believe you are still at the keyboard, so apps that set your status from how
@@ -106,7 +106,7 @@ notification each time.
 
 ### Languages
 
-English, 简体中文, 繁體中文, 日本語, 한국어, Deutsch, Français, Español,
+English, <span lang="zh-CN">简体中文</span>, <span lang="zh-TW">繁體中文</span>, <span lang="ja">日本語</span>, <span lang="ko">한국어</span>, Deutsch, Français, Español,
 Português, Русский. By default it follows your Windows display language and
 falls back to English; you can change it any time from the panel.
 

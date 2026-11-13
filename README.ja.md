@@ -1,6 +1,8 @@
+<div lang="ja">
+
 # Mouse Keeper
 
-[English](README.md) · [简体中文](README.zh-CN.md) · **日本語**
+[English](README.md) · [<span lang="zh-CN">简体中文</span>](README.zh-CN.md) · **日本語**
 
 常に「連絡可能」の表示を保つ、Windows の通知領域に常駐する小さなツールです。
 Windows にまだあなたが PC の前にいると思わせるので、PC のアイドル時間から状態を
@@ -104,7 +106,7 @@ Windows にまだあなたが PC の前にいると思わせるので、PC の�
 
 ### 言語
 
-English、简体中文、繁體中文、日本語、한국어、Deutsch、Français、Español、
+English、<span lang="zh-CN">简体中文</span>、<span lang="zh-TW">繁體中文</span>、日本語、<span lang="ko">한국어</span>、Deutsch、Français、Español、
 Português、Русский。既定では Windows の表示言語に合わせ、該当しない場合は
 英語になります。パネルからいつでも変更できます。
 
@@ -240,3 +242,5 @@ python -m venv .venv
 ## ライセンス
 
 [MIT](LICENSE)。
+
+</div>

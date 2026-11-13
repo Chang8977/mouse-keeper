@@ -1,6 +1,8 @@
+<div lang="zh-CN">
+
 # Mouse Keeper
 
-[English](README.md) · **简体中文** · [日本語](README.ja.md)
+[English](README.md) · **简体中文** · [<span lang="ja">日本語</span>](README.ja.md)
 
 一个常驻 Windows 托盘的小工具，让你一直显示为"在线"。它让 Windows 以为你还在
 电脑前，所以那些根据电脑空闲时间来判断状态的软件 —— 最常见的就是 Microsoft
@@ -96,7 +98,7 @@ Release 中的安装包由 GitHub Actions 根据公开的源码自动构建，�
 
 ### 语言
 
-English、简体中文、繁體中文、日本語、한국어、Deutsch、Français、Español、
+English、简体中文、<span lang="zh-TW">繁體中文</span>、<span lang="ja">日本語</span>、<span lang="ko">한국어</span>、Deutsch、Français、Español、
 Português、Русский。默认跟随 Windows 显示语言，匹配不上时使用英语；
 随时可以在面板里切换。
 
@@ -221,3 +223,5 @@ python -m venv .venv
 ## 许可证
 
 [MIT](LICENSE)。
+
+</div>
