@@ -1,0 +1,99 @@
+# Build Mouse Keeper on a clean Windows runner and publish it as a release.
+#
+#   push a tag vX.Y.Z   -> build, then attach the zip + SHA-256 to release vX.Y.Z
+#                          (created if it does not exist yet)
+#   Run workflow button -> build only; the zip is kept as a workflow artifact,
+#                          handy for checking a build before tagging it
+#
+# The build itself goes through build.ps1, the same script used locally, so a
+# release can never be built differently from what you get on your own machine.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # needed to create the release and upload its assets
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # build.ps1 skips venv creation when .venv already exists, so preparing it
+      # here lets the PyInstaller version be pinned for reproducible builds.
+      - name: Prepare build environment
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python -m pip install --upgrade pip
+          .venv\Scripts\python -m pip install -r requirements.txt pyinstaller==6.21.0
+
+      - name: Read version
+        id: version
+        run: |
+          $ver = .venv\Scripts\python -c "from mouse_keeper import __version__; print(__version__)"
+          "version=$ver" >> $env:GITHUB_OUTPUT
+          Write-Host "mouse_keeper.__version__ = $ver"
+
+      # Catches the classic slip of tagging a release without bumping
+      # mouse_keeper/__init__.py, which would ship an exe reporting the old version.
+      - name: Check tag matches version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $ver = "${{ steps.version.outputs.version }}"
+          if ($tag -ne "v$ver") {
+            Write-Error "Tag $tag does not match __version__ $ver -- bump mouse_keeper/__init__.py first."
+            exit 1
+          }
+
+      - name: Smoke test imports
+        run: .venv\Scripts\python -c "import mouse_keeper.tray, mouse_keeper.icon; print('imports ok')"
+
+      - name: Build
+        run: .\build.ps1
+
+      - name: Package
+        id: package
+        run: |
+          $name = "MouseKeeper-${{ steps.version.outputs.version }}-win64.zip"
+          Compress-Archive -Path dist\MouseKeeper -DestinationPath $name
+          $hash = (Get-FileHash $name -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name" | Out-File -Encoding ascii "$name.sha256"
+          Get-Content "$name.sha256"
+          "zip=$name" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MouseKeeper-${{ steps.version.outputs.version }}-win64
+          path: |
+            ${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.zip }}.sha256
+
+      # A release written by hand beforehand keeps its notes; only the files are
+      # replaced. Otherwise the release is created with notes generated from the
+      # commits since the previous tag.
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $zip = "${{ steps.package.outputs.zip }}"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zip "$zip.sha256" --clobber
+          } else {
+            gh release create $tag $zip "$zip.sha256" --title "Mouse Keeper $tag" --generate-notes --verify-tag
+          }

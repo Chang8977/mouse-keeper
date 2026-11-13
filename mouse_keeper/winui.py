@@ -72,6 +72,65 @@ def dpi_of(widget) -> int:
     return user32.GetDpiForWindow(wintypes.HWND(hwnd_of(widget))) or 96
 
 
+# --------------------------------------------------------------------------
+# Monitors: which screen a point is on, its work area and its DPI
+# --------------------------------------------------------------------------
+
+MONITOR_DEFAULTTONEAREST = 2
+MDT_EFFECTIVE_DPI = 0
+
+
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("rcMonitor", wintypes.RECT),
+        ("rcWork", wintypes.RECT),
+        ("dwFlags", wintypes.DWORD),
+    ]
+
+
+# HMONITOR is a handle: declare it pointer-sized, for the same reason as the
+# DPI context above.
+user32.MonitorFromPoint.argtypes = (wintypes.POINT, wintypes.DWORD)
+user32.MonitorFromPoint.restype = wintypes.HANDLE
+user32.GetMonitorInfoW.argtypes = (wintypes.HANDLE, ctypes.POINTER(MONITORINFO))
+user32.GetMonitorInfoW.restype = wintypes.BOOL
+
+
+def monitor_at(x: int, y: int) -> tuple[tuple[int, int, int, int], int] | None:
+    """Work area ``(left, top, right, bottom)`` and DPI of the monitor holding
+    the point (or the nearest one), in physical pixels.
+
+    The work area excludes the taskbar, and on a multi-monitor setup it can sit
+    at negative coordinates (a screen left of or above the primary one) --
+    which is exactly what ``winfo_screenwidth`` / ``winfo_screenheight`` cannot
+    describe, since they only ever report the primary screen's size.
+    Returns None if the lookup fails, so callers can fall back.
+    """
+    try:
+        hmon = user32.MonitorFromPoint(wintypes.POINT(int(x), int(y)),
+                                       MONITOR_DEFAULTTONEAREST)
+        if not hmon:
+            return None
+        info = MONITORINFO()
+        info.cbSize = ctypes.sizeof(MONITORINFO)
+        if not user32.GetMonitorInfoW(hmon, ctypes.byref(info)):
+            return None
+        rc = info.rcWork
+        dpi = 96
+        try:
+            dx, dy = wintypes.UINT(), wintypes.UINT()
+            if ctypes.WinDLL("shcore").GetDpiForMonitor(
+                    wintypes.HANDLE(hmon), MDT_EFFECTIVE_DPI,
+                    ctypes.byref(dx), ctypes.byref(dy)) == 0:
+                dpi = dx.value or 96
+        except OSError:
+            pass
+        return (rc.left, rc.top, rc.right, rc.bottom), dpi
+    except (OSError, ctypes.ArgumentError):
+        return None
+
+
 def _set_attr(hwnd: int, attr: int, value: int) -> bool:
     v = ctypes.c_int(value)
     return dwmapi.DwmSetWindowAttribute(

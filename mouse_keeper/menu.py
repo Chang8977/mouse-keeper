@@ -71,7 +71,11 @@ class Item:
       status     the status card (badge + state + detail); clicking runs action
       action     an ordinary row
       toggle     an ordinary row plus a check mark
-      segmented  a label on the left, a row of choices on the right
+      segmented  a label on the left, a row of choices on the right. If value()
+                 returns a set/tuple/list, every option in it is highlighted
+                 (multi-select). An option whose value is None is drawn as
+                 plain text and is not clickable -- the number between the
+                 two buttons of a -/+ stepper.
       label      dimmed explanatory text, not clickable
       separator  a divider line
     """
@@ -129,6 +133,10 @@ class Panel:
         self.zones: list[_Zone] = []
         self._hover: int | None = None
         self._signature: tuple | None = None
+        #: Bottom-right corner the panel is pinned to while shown, and the
+        #: monitor work area it must stay inside. None while hidden.
+        self._anchor: tuple[int, int] | None = None
+        self._area: tuple[int, int, int, int] = (0, 0, 0, 0)
 
         c = menu.colors
         self.win = tk.Toplevel(menu.root)
@@ -211,7 +219,8 @@ class Panel:
             sig.append((it.kind, it.resolve_text(),
                         it.detail() if it.detail else None,
                         it.state() if it.state else None,
-                        it.value() if it.value else None,
+                        _freeze(it.value()) if it.value else None,
+                        tuple(label for label, _v in it.options),
                         it.is_checked()))
         return tuple(sig)
 
@@ -255,7 +264,14 @@ class Panel:
         self.width = width
         self.height = y + m.px(PAD_Y)
         self.canvas.configure(width=self.width, height=self.height)
-        self.win.geometry(f"{self.width}x{self.height}")
+        if self._anchor is not None:
+            # Already on screen: the content (page, language, a longer label)
+            # may have changed the size, so re-place it against the same corner.
+            # Resizing in place would grow it rightwards and downwards -- off
+            # the screen, since the panel sits in the bottom-right corner.
+            self._place()
+        else:
+            self.win.geometry(f"{self.width}x{self.height}")
 
     def _draw_row(self, it: Item, y: int, width: int) -> int:
         m, c = self.menu, self.menu.colors
@@ -320,11 +336,18 @@ class Panel:
                                 anchor="w", font=m.font, fill=c["fg"])
 
         current = it.value() if it.value else None
+        multi = isinstance(current, (set, frozenset, tuple, list))
         chip_h = m.px(20)
         cy0, cy1 = mid - chip_h // 2, mid + chip_h // 2
         for label, value in it.options:
             w = m.font_small.measure(label) + 2 * m.px(CHIP_PAD_X)
-            selected = value == current
+            if value is None:
+                # Display-only: the readout of a stepper
+                self.canvas.create_text(x + w // 2, mid, text=label, anchor="center",
+                                        font=m.font_small, fill=c["fg"])
+                x += w + m.px(CHIP_GAP)
+                continue
+            selected = (value in current) if multi else (value == current)
             fill = c["accent"] if selected else c["chip"]
             fill_hover = c["accent_hover"] if selected else c["chip_hover"]
             shape = m.rounded_rect(self.canvas, x, cy0, x + w, cy1, m.px(CHIP_RADIUS),
@@ -397,17 +420,35 @@ class Panel:
                           else None)
 
     # ------------------------------------------------------------------
-    def show_at(self, x: int, y: int) -> None:
-        sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
-        x = max(0, min(int(x), sw - self.width))
-        y = max(0, min(int(y), sh - self.height))
-        self.win.geometry(f"{self.width}x{self.height}+{x}+{y}")
+    def show_at(self, x: int, y: int,
+                area: tuple[int, int, int, int] | None = None) -> None:
+        """Show the panel with its bottom-right corner at (x, y) -- the click
+        point, so it expands up and to the left, away from the tray -- clamped
+        inside ``area``, the work area of the monitor the tray icon is on.
+        Without one, fall back to the primary screen."""
+        if area is None:
+            area = (0, 0, self.win.winfo_screenwidth(), self.win.winfo_screenheight())
+        self._anchor = (int(x), int(y))
+        self._area = area
+        self._place()
         self.win.deiconify()
         self.win.lift()
         hwnd = winui.hwnd_of(self.win)
         winui.round_corners(hwnd)
         winui.use_dark_titlebar(hwnd, self.menu.dark)
         self.sync_hover()
+
+    def _place(self) -> None:
+        ax, ay = self._anchor
+        left, top, right, bottom = self._area
+        x = max(left, min(ax - self.width, right - self.width))
+        y = max(top, min(ay - self.height, bottom - self.height))
+        self.win.geometry(f"{self.width}x{self.height}+{x}+{y}")
+
+    def hidden(self) -> None:
+        """Forget the anchor once withdrawn, so a rebuild while hidden does not
+        drag the window around."""
+        self._anchor = None
 
     def refresh(self, force: bool = False) -> bool:
         """Repaint only when something actually changed.
@@ -426,6 +467,13 @@ class Panel:
         self.win.destroy()
 
 
+def _freeze(value: Any) -> Any:
+    """Make a multi-select value comparable regardless of container type/order."""
+    if isinstance(value, (set, frozenset, list, tuple)):
+        return tuple(sorted(value))
+    return value
+
+
 def _select(handler: Callable[[Any], None], value: Any) -> Callable[[], None]:
     """Closure factory -- a lambda written inline in the loop would capture the
     last value rather than the current one."""
@@ -438,6 +486,9 @@ class FluentMenu:
         self.root = root
         self.items_provider = items_provider
         self.on_closed = on_closed or (lambda: None)
+        #: While set, every key press in the panel goes here first; returning
+        #: True means "handled". Used to capture a new hotkey.
+        self.key_handler: Callable[[Any], bool] | None = None
         self.dark = winui.system_uses_dark_theme()
         self.colors = DARK if self.dark else LIGHT
         self.panel: Panel | None = None
@@ -475,8 +526,19 @@ class FluentMenu:
         if self._visible:
             self.close()
             return
+        # The tray can live on any monitor, and each monitor can have its own
+        # scaling: size the panel for the one under the cursor, not the one the
+        # app happened to start on.
+        monitor = winui.monitor_at(x, y)
+        area, dpi = monitor if monitor else (None, round(self.scale * 96))
+        scale = dpi / 96.0
+        rescaled = abs(scale - self.scale) > 1e-6
+        if rescaled:
+            self.scale = scale
+            self.rebuild_fonts()
+
         dark = winui.system_uses_dark_theme()
-        if dark != self.dark or self.panel is None:
+        if dark != self.dark or self.panel is None or rescaled:
             self.dark = dark
             self.colors = DARK if dark else LIGHT
             self._discard()
@@ -486,12 +548,23 @@ class FluentMenu:
             self.panel.build()
 
         # Expand up and to the left, away from the tray
-        self.panel.show_at(x - self.panel.width, y - self.panel.height)
+        self.panel.show_at(x, y, area)
         self._visible = True
         win = self.panel.win
         win.focus_force()
         win.bind("<FocusOut>", lambda _e: self.close())
-        win.bind("<Escape>", lambda _e: self.close())
+        # One generic binding rather than a separate <Escape> one: Tk only fires
+        # the most specific match, so an <Escape> binding would swallow Esc
+        # before a hotkey capture in progress could treat it as "cancel".
+        win.bind("<KeyPress>", self._on_key)
+
+    def _on_key(self, event):
+        if self.key_handler is not None and self.key_handler(event):
+            return "break"
+        if event.keysym == "Escape":
+            self.close()
+            return "break"
+        return None
 
     def refresh(self, force: bool = False) -> None:
         """Called on a timer while the panel is open so the status text keeps up."""
@@ -504,6 +577,7 @@ class FluentMenu:
         self._visible = False
         if self.panel is not None:
             self.panel.win.withdraw()
+            self.panel.hidden()
         self.on_closed()
 
     def _discard(self) -> None:

@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
+from . import schedule
 from .i18n import LANGUAGES
 
 MODE_SMART = "smart"
@@ -48,8 +49,18 @@ class Config:
     auto_stop_hours: float = 8.0
     #: UI language. "auto" follows the Windows display language.
     language: str = "auto"
-    #: Global pause / resume hotkey
+    #: Global pause / resume hotkey; an empty string turns it off
     hotkey: str = "ctrl+alt+f12"
+    #: Follow a work-hours schedule: switch on when a window opens, off when it
+    #: closes. Manual toggles in between still work (see engine).
+    schedule_enabled: bool = False
+    #: Weekdays the schedule covers, Monday = 0 ... Sunday = 6
+    schedule_days: list[int] = field(default_factory=lambda: list(schedule.DEFAULT_DAYS))
+    #: "HH:MM". An end earlier than the start runs past midnight.
+    schedule_start: str = schedule.DEFAULT_START
+    schedule_end: str = schedule.DEFAULT_END
+    #: Look for a newer release on GitHub (once at startup, then daily)
+    check_updates: bool = True
     #: Start keeping alive immediately on launch
     start_active: bool = True
     #: Write a log file
@@ -67,8 +78,17 @@ class Config:
         self.keep_display_on = bool(self.keep_display_on)
         self.start_active = bool(self.start_active)
         self.log_enabled = bool(self.log_enabled)
-        if not isinstance(self.hotkey, str) or not self.hotkey.strip():
+        # "" is a deliberate "no hotkey"; only a non-string is treated as broken
+        if not isinstance(self.hotkey, str):
             self.hotkey = "ctrl+alt+f12"
+        self.hotkey = self.hotkey.strip().lower()
+        self.schedule_enabled = bool(self.schedule_enabled)
+        self.schedule_days = schedule.clean_days(self.schedule_days)
+        self.schedule_start = schedule.fmt_hhmm(
+            schedule.parse_hhmm(self.schedule_start, schedule.DEFAULT_START))
+        self.schedule_end = schedule.fmt_hhmm(
+            schedule.parse_hhmm(self.schedule_end, schedule.DEFAULT_END))
+        self.check_updates = bool(self.check_updates)
         if self.language != "auto" and self.language not in LANGUAGES:
             self.language = "auto"
 

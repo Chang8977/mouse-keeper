@@ -19,9 +19,10 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Callable
 
-from . import winapi
+from . import schedule, winapi
 from .config import MODE_SMART, Config
 from .i18n import t
 
@@ -44,6 +45,10 @@ class Stats:
     auto_stopped: bool = False   # stopped because the run-time limit was hit
     stalls: int = 0              # how many freeze/wake events were detected
     blocked: bool = False        # currently unable to inject (locked session)
+    off_hours: bool = False      # paused because the work-hours window closed
+    #: "on" / "off" when the schedule just switched keep-alive; the UI consumes
+    #: it (resets it to "") to show a notification exactly once.
+    schedule_event: str = ""
 
     @property
     def active_seconds(self) -> float:
@@ -66,15 +71,27 @@ class Engine:
         self._lock = threading.Lock()
         self._awake_asserted = False
         self._last_force_jiggle = 0.0
+        #: Whether the previous tick was inside the work-hours window. None
+        #: means "unknown", which makes the next tick apply the schedule as-is.
+        self._was_inside: bool | None = None
         self._thread = threading.Thread(target=self._run, name="engine", daemon=True)
 
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
     def start(self) -> None:
-        self._thread.start()
-        if self.config.start_active:
+        if self.config.schedule_enabled:
+            # The schedule decides the initial state: launching at 20:00 should
+            # not start keeping alive just because start_active is on.
+            inside = self._inside_now()
+            self._was_inside = inside
+            if inside:
+                self.set_active(True)
+            else:
+                self.stats.off_hours = True
+        elif self.config.start_active:
             self.set_active(True)
+        self._thread.start()
 
     def shutdown(self) -> None:
         self._stop.set()
@@ -89,6 +106,9 @@ class Engine:
             if value == self._active:
                 return
             self._active = value
+            # Any explicit change -- user, hotkey or schedule -- ends "off hours";
+            # the schedule sets it again itself when it is the one pausing.
+            self.stats.off_hours = False
             if value:
                 self.stats.started_at = time.time()
                 self.stats.auto_stopped = False
@@ -106,6 +126,17 @@ class Engine:
         self.set_active(not self._active)
         return self._active
 
+    def schedule_changed(self) -> None:
+        """Settings of the schedule changed: re-apply it on the next tick.
+
+        Turning the schedule on (or moving the window) means "follow it from
+        now on", so the current state is brought in line straight away rather
+        than waiting for the next boundary.
+        """
+        self._was_inside = None
+        if not self.config.schedule_enabled:
+            self.stats.off_hours = False
+
     # -- Three read-only views for the UI --------------------------------
     def state(self) -> str:
         """paused | locked | running"""
@@ -115,6 +146,8 @@ class Engine:
 
     def state_text(self) -> str:
         state = self.state()
+        if state == "paused" and self.stats.off_hours:
+            return t("state_off_hours")
         if state == "paused" and self.stats.auto_stopped:
             return t("state_stopped")
         return t(f"state_{state}")
@@ -122,6 +155,9 @@ class Engine:
     def status_text(self) -> str:
         """The detail line on the status card."""
         if not self._active:
+            if self.stats.off_hours:
+                when = self.next_start_text()
+                return t("detail_next_start", when=when) if when else t("detail_start")
             return t("detail_limit") if self.stats.auto_stopped else t("detail_start")
         if self.stats.blocked:
             return t("detail_locked")
@@ -172,7 +208,52 @@ class Engine:
             self._last_force_jiggle = 0.0  # make Always mode fire immediately
         self._on_change()
 
+    def next_start_text(self) -> str:
+        """'09:00' if the next window opens today, else 'Mo 09:00'."""
+        now = datetime.now()
+        nxt = schedule.next_start(self.config.schedule_days, self.config.schedule_start, now)
+        if nxt is None:
+            return ""
+        hhmm = nxt.strftime("%H:%M")
+        if nxt.date() == now.date():
+            return hhmm
+        return f"{t('days_short').split()[nxt.weekday()]} {hhmm}"
+
+    def _inside_now(self) -> bool:
+        c = self.config
+        return schedule.in_window(c.schedule_days, c.schedule_start, c.schedule_end,
+                                  datetime.now())
+
+    def _check_schedule(self) -> None:
+        """Act on the *edges* of the work-hours window only.
+
+        Reacting to edges rather than forcing the state every tick is what
+        keeps manual control usable: pausing for lunch inside the window, or
+        switching on for an evening call outside it, sticks until the next
+        boundary instead of being undone a second later.
+        """
+        if not self.config.schedule_enabled:
+            self._was_inside = None
+            return
+        inside = self._inside_now()
+        if inside == self._was_inside:
+            return
+        self._was_inside = inside
+        if inside and not self._active:
+            self._log("work hours started, keep-alive on")
+            self.set_active(True)
+            self.stats.schedule_event = "on"
+        elif not inside and self._active:
+            self._log("work hours over, keep-alive paused")
+            self.set_active(False)
+            self.stats.off_hours = True
+            self.stats.schedule_event = "off"
+        elif not inside:
+            self.stats.off_hours = True
+        self._on_change()
+
     def _tick(self) -> None:
+        self._check_schedule()
         if not self._active:
             if self._awake_asserted:
                 winapi.release_awake()

@@ -14,9 +14,11 @@ import subprocess
 import tempfile
 import time
 import tkinter as tk
+import webbrowser
 from pathlib import Path
 
-from . import APP_NAME, __version__, autostart, i18n, icon as icon_art, winapi, winui
+from . import APP_NAME, __version__, autostart, i18n, icon as icon_art, schedule, winapi, winui
+from .updates import UpdateChecker
 from .config import MODE_FORCE, MODE_SMART, Config, config_path, log_path
 from .engine import Engine
 from .i18n import t
@@ -53,9 +55,18 @@ class App:
 
         self.tray = TrayIcon(self._tooltip(), on_left=self._on_left_click,
                              on_right=self._on_right_click)
-        self.menu = FluentMenu(self.root, self._build_items)
+        self.menu = FluentMenu(self.root, self._build_items, on_closed=self._on_panel_closed)
 
         self.hotkey: winapi.HotKeyListener | None = None
+        #: True while the hotkey row is waiting for a new key combination
+        self._capturing = False
+        #: (version, release page URL) once a newer release has been seen.
+        #: Written by the update thread, read on the main thread; a tuple is
+        #: swapped in atomically, so no lock is needed.
+        self._update: tuple[str, str] | None = None
+        self._update_notified: str | None = None
+        self.updater = UpdateChecker(enabled=lambda: self.config.check_updates,
+                                     on_found=self._on_update_found, log=self._log)
         self._icon_state: str | None = None
         #: Which artwork set (light/dark taskbar) is currently shown. Tracked
         #: separately from the panel's own theme -- Windows lets the taskbar
@@ -63,10 +74,10 @@ class App:
         self._icon_variant: str | None = None
         self._auto_stop_notified = False
         self._dirty = True
-        #: Whether the panel is showing the main page or the language page.
-        #: There are too many languages to fit on one row, and bringing back the
-        #: cascading submenus we just removed was not appealing, so this is a
-        #: second page within the same panel.
+        #: Which page the panel shows: "main", "language" or "schedule".
+        #: Ten languages or a full schedule do not fit on one row, and the
+        #: panel deliberately has no cascading submenus (see menu.py), so these
+        #: are extra pages within the same panel.
         self._page = "main"
 
     # ------------------------------------------------------------------
@@ -78,7 +89,8 @@ class App:
         if not self.tray.show(self._icon_paths[self._icon_variant][self._icon_state]):
             raise OSError("failed to register the tray icon")
         self.engine.start()
-        self._start_hotkey()
+        self._start_hotkey(self.config.hotkey)
+        self.updater.start()
         self.root.after(PUMP_MS, self._pump_loop)
         self.root.after(REFRESH_MS, self._refresh_loop)
         self.root.after(PANEL_REFRESH_MS, self._panel_loop)
@@ -87,8 +99,8 @@ class App:
         self.root.mainloop()
 
     def _quit(self) -> None:
-        if self.hotkey:
-            self.hotkey.stop()
+        self._stop_hotkey()
+        self.updater.stop()
         self.engine.shutdown()
         self.config.save()
         self._log("exit")
@@ -96,16 +108,32 @@ class App:
         self.tray.close()
         self.root.quit()
 
-    def _start_hotkey(self) -> None:
-        listener = winapi.HotKeyListener(self.config.hotkey, self._on_hotkey)
+    def _start_hotkey(self, spec: str, quiet: bool = False) -> str | None:
+        """Register ``spec`` as the global hotkey. Returns the error, if any.
+
+        An empty spec means "no hotkey" and is not an error.
+        """
+        self.hotkey = None
+        if not spec:
+            return None
+        listener = winapi.HotKeyListener(spec, self._on_hotkey)
         listener.start()
         listener.wait_ready()
         if listener.error:
             self._log(f"hotkey unavailable: {listener.error}")
-            self._notify(t("notify_hotkey_fail", err=listener.error))
+            if not quiet:
+                self._notify(t("notify_hotkey_fail", err=listener.error))
+            return listener.error
+        self.hotkey = listener
+        return None
+
+    def _stop_hotkey(self) -> None:
+        if self.hotkey:
+            self.hotkey.stop()
+            # Wait for UnregisterHotKey to have run, or re-registering the same
+            # combination straight away would fail as "already taken".
+            self.hotkey.join(timeout=1.0)
             self.hotkey = None
-        else:
-            self.hotkey = listener
 
     def _on_hotkey(self) -> None:
         # The hotkey callback arrives on the hotkey thread and must not touch the
@@ -159,6 +187,15 @@ class App:
         elif self.engine.active:
             self._auto_stop_notified = False
 
+        event, self.engine.stats.schedule_event = self.engine.stats.schedule_event, ""
+        if event:
+            self._notify(t("notify_schedule_on") if event == "on" else t("notify_schedule_off"))
+
+        update = self._update
+        if update and update[0] != self._update_notified:
+            self._update_notified = update[0]
+            self._notify(t("notify_update", v=update[0]))
+
     def _tooltip(self) -> str:
         mode = t("opt_smart") if self.config.mode == MODE_SMART else t("opt_force")
         return (f"{APP_NAME} · {self.engine.state_text()} · "
@@ -194,6 +231,13 @@ class App:
     def _build_items(self) -> list[Item]:
         if self._page == "language":
             return self._language_items()
+        if self._page == "schedule":
+            return self._schedule_items()
+        update_rows: list[Item] = []
+        if self._update:
+            version, _url = self._update
+            update_rows = [Item(text=lambda: t("row_update_available", v=version),
+                                action=self._open_update), separator()]
         return [
             Item(kind="status",
                  text=self.engine.state_text,
@@ -211,6 +255,9 @@ class App:
                  options=[(t("opt_unlimited") if h == 0 else f"{h:g}", h)
                           for h in AUTO_STOP_CHOICES],
                  value=lambda: self.config.auto_stop_hours, on_select=self._set_auto_stop),
+            Item(text=lambda: f"{t('row_schedule')} · {self._schedule_summary()}",
+                 action=self._open_page("schedule"),
+                 checked=lambda: self.config.schedule_enabled),
             Item(kind="toggle", text=lambda: t("row_keep_display"),
                  action=self._toggle_display,
                  checked=lambda: self.config.keep_display_on),
@@ -219,25 +266,66 @@ class App:
                  text=lambda: (t("row_autostart_stale") if autostart.is_stale()
                                else t("row_autostart")),
                  action=self._toggle_autostart, checked=autostart.is_enabled),
+            Item(text=self._hotkey_row_text, action=self._begin_hotkey_capture),
+            Item(kind="toggle", text=lambda: t("row_check_updates"),
+                 action=self._toggle_updates, checked=lambda: self.config.check_updates),
             Item(kind="toggle", text=lambda: t("row_logging"), action=self._toggle_log,
                  checked=lambda: self.config.log_enabled),
             Item(text=lambda: f"{t('row_language')} · {i18n.LANGUAGES[i18n.current()][0]}",
-                 action=self._open_language_page),
+                 action=self._open_page("language")),
             Item(text=lambda: t("row_open_config"), action=self._open_config_dir),
             separator(),
+            *update_rows,
             Item(text=lambda: t("row_quit"), action=self._quit),
             Item(kind="label", text=f"{APP_NAME} {__version__}"),
         ]
 
     def _language_items(self) -> list[Item]:
         items: list[Item] = [
-            Item(text=lambda: f"‹  {t('row_back')}", action=self._close_language_page),
+            Item(text=lambda: f"‹  {t('row_back')}", action=self._open_page("main")),
             separator(),
         ]
         for code, name in i18n.available():
             items.append(Item(kind="toggle", text=name, action=self._set_language(code),
                               checked=self._language_is(code)))
         return items
+
+    def _schedule_items(self) -> list[Item]:
+        c = self.config
+        labels = t("days_short").split()
+        step = schedule.STEP_MINUTES
+        return [
+            Item(text=lambda: f"‹  {t('row_back')}", action=self._open_page("main")),
+            separator(),
+            Item(kind="toggle", text=lambda: t("row_schedule_enable"),
+                 action=self._toggle_schedule, checked=lambda: c.schedule_enabled),
+            Item(kind="segmented", text=lambda: t("row_days"),
+                 options=[(labels[d], d) for d in range(7)],
+                 value=lambda: tuple(c.schedule_days), on_select=self._toggle_day),
+            # -/+ steppers: the middle "chip" has value None, so it is a plain
+            # readout. Its text is baked into the item, which is why every
+            # change rebuilds the page.
+            Item(kind="segmented", text=lambda: t("row_start"),
+                 options=[("−", -step), (c.schedule_start, None), ("+", step)],
+                 on_select=self._shift_time("schedule_start", schedule.DEFAULT_START)),
+            Item(kind="segmented", text=lambda: t("row_end"),
+                 options=[("−", -step), (c.schedule_end, None), ("+", step)],
+                 on_select=self._shift_time("schedule_end", schedule.DEFAULT_END)),
+            Item(kind="label", text=lambda: t("label_schedule_hint")),
+        ]
+
+    def _schedule_summary(self) -> str:
+        c = self.config
+        if not c.schedule_enabled:
+            return t("opt_off")
+        days = schedule.summarize_days(c.schedule_days, t("days_short").split())
+        return f"{days} {c.schedule_start}–{c.schedule_end}".strip()
+
+    def _hotkey_row_text(self) -> str:
+        if self._capturing:
+            return t("row_hotkey_capture")
+        key = winapi.format_hotkey(self.config.hotkey) if self.config.hotkey else t("opt_off")
+        return f"{t('row_hotkey')} · {key}"
 
     # -- Panel callbacks ------------------------------------------------
     # Segmented controls and toggles are "change it and keep looking" actions,
@@ -274,13 +362,127 @@ class App:
         # the "skip when unchanged" path.
         self.menu.refresh(force=True)
 
-    def _open_language_page(self) -> None:
-        self._page = "language"
+    def _open_page(self, page: str):
+        def handler():
+            self._page = page
+            self._rebuild_panel()
+        return handler
+
+    # -- Work hours -------------------------------------------------------
+    def _schedule_edited(self) -> None:
+        self.config.save()
+        self.engine.schedule_changed()
+        self._apply_state()
         self._rebuild_panel()
 
-    def _close_language_page(self) -> None:
-        self._page = "main"
-        self._rebuild_panel()
+    def _toggle_schedule(self) -> None:
+        self.config.schedule_enabled = not self.config.schedule_enabled
+        self._schedule_edited()
+
+    def _toggle_day(self, day: int) -> None:
+        days = set(self.config.schedule_days)
+        if day in days:
+            # Keep at least one day: an empty schedule would silently never run
+            if len(days) == 1:
+                return
+            days.discard(day)
+        else:
+            days.add(day)
+        self.config.schedule_days = sorted(days)
+        self._schedule_edited()
+
+    def _shift_time(self, attr: str, default: str):
+        def handler(delta: int) -> None:
+            setattr(self.config, attr, schedule.shift(getattr(self.config, attr), delta, default))
+            self._schedule_edited()
+        return handler
+
+    # -- Hotkey ---------------------------------------------------------
+    def _begin_hotkey_capture(self) -> None:
+        if self._capturing:
+            return
+        self._capturing = True
+        # Release the current hotkey first: while it is registered, pressing it
+        # again would toggle keep-alive instead of reaching the panel.
+        self._stop_hotkey()
+        self.menu.key_handler = self._on_capture_key
+        self._after_change()
+
+    def _on_capture_key(self, event) -> bool:
+        if not self._capturing:
+            return False
+        # Tk on Windows reports the Win32 virtual-key code as the keycode
+        vk = event.keycode
+        if winapi.is_modifier_vk(vk):
+            return True                       # wait for the main key
+        mods = winapi.held_modifiers()
+        if not mods and event.keysym == "Escape":
+            self._end_hotkey_capture(None)
+            return True
+        if not mods and event.keysym == "BackSpace":
+            self._end_hotkey_capture("")
+            return True
+        spec = winapi.hotkey_spec(mods, vk)
+        if spec is None:
+            return True                       # not a bindable key; keep waiting
+        is_fkey = 0x70 <= vk <= 0x87
+        strong = mods & (winapi.MOD_CONTROL | winapi.MOD_ALT | winapi.MOD_WIN)
+        # A bare letter or Shift+letter would be swallowed system-wide and break
+        # typing. Function keys are fine with any modifier, and F13-F24 (macro
+        # keys on some keyboards) even on their own.
+        if not (strong or (is_fkey and (mods or vk >= 0x7C))):
+            self._notify(t("notify_hotkey_needs_mod"))
+            return True
+        self._end_hotkey_capture(spec)
+        return True
+
+    def _end_hotkey_capture(self, spec: str | None) -> None:
+        """spec: the new hotkey, "" to turn it off, None to cancel."""
+        if not self._capturing:
+            return
+        self._capturing = False
+        self.menu.key_handler = None
+        old = self.config.hotkey
+        if spec is None or spec == old:
+            self._start_hotkey(old)
+        elif spec == "":
+            self.config.hotkey = ""
+            self.config.save()
+            self._log("hotkey turned off")
+            self._notify(t("notify_hotkey_off"))
+        else:
+            err = self._start_hotkey(spec, quiet=True)
+            if err:
+                self._notify(t("notify_hotkey_fail", err=err))
+                self._start_hotkey(old)
+            else:
+                self.config.hotkey = spec
+                self.config.save()
+                self._log(f"hotkey set to {spec}")
+                self._notify(t("notify_hotkey_set", combo=winapi.format_hotkey(spec)))
+        self._after_change()
+
+    def _on_panel_closed(self) -> None:
+        # Clicking away mid-capture means "never mind"
+        if self._capturing:
+            self._end_hotkey_capture(None)
+
+    # -- Updates --------------------------------------------------------
+    def _toggle_updates(self) -> None:
+        self.config.check_updates = not self.config.check_updates
+        if self.config.check_updates:
+            self.updater.poke()
+        self._after_change(save=True)
+
+    def _on_update_found(self, version: str, url: str) -> None:
+        """Called on the update thread: store and flag only."""
+        self._update = (version, url)
+        self._dirty = True
+
+    def _open_update(self) -> None:
+        if self._update:
+            self.menu.close()
+            webbrowser.open(self._update[1])
 
     def _language_is(self, code: str):
         return lambda: i18n.current() == code

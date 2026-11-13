@@ -245,9 +245,84 @@ _VK_NAMES = {
     "end": 0x23,
     "pause": 0x13,
     "scrolllock": 0x91,
+    "pageup": 0x21,
+    "pagedown": 0x22,
+    "left": 0x25,
+    "up": 0x26,
+    "right": 0x27,
+    "down": 0x28,
 }
 for _c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789":
     _VK_NAMES[_c.lower()] = ord(_c)
+for _i in range(10):
+    _VK_NAMES[f"num{_i}"] = 0x60 + _i
+
+#: vk -> canonical name, for turning a captured key press back into a spec.
+#: Built from _VK_NAMES so the two can never disagree; where a key has two
+#: names the first one listed wins ("escape" over "esc").
+_NAME_OF_VK: dict[int, str] = {}
+for _name, _vk in _VK_NAMES.items():
+    _NAME_OF_VK.setdefault(_vk, _name)
+
+#: Display names that plain capitalisation would get wrong
+_DISPLAY_NAMES = {"ctrl": "Ctrl", "control": "Ctrl", "escape": "Esc", "esc": "Esc",
+                  "pageup": "PgUp", "pagedown": "PgDn", "scrolllock": "ScrollLock"}
+
+#: Canonical modifier order for display and storage
+_MOD_ORDER = (("ctrl", MOD_CONTROL), ("alt", MOD_ALT), ("shift", MOD_SHIFT), ("win", MOD_WIN))
+
+VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN = 0x10, 0x11, 0x12, 0x5B, 0x5C
+#: Keys that are only ever modifiers (incl. the left/right-specific codes)
+_MODIFIER_VKS = {VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN,
+                 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5}
+
+user32.GetKeyState.argtypes = (ctypes.c_int,)
+user32.GetKeyState.restype = ctypes.c_short
+
+
+def held_modifiers() -> int:
+    """MOD_* flags for the modifier keys down right now, as seen by the thread
+    processing the current key message (GetKeyState, not GetAsyncKeyState)."""
+    def down(vk: int) -> bool:
+        return bool(user32.GetKeyState(vk) & 0x8000)
+    mods = 0
+    if down(VK_CONTROL):
+        mods |= MOD_CONTROL
+    if down(VK_MENU):
+        mods |= MOD_ALT
+    if down(VK_SHIFT):
+        mods |= MOD_SHIFT
+    if down(VK_LWIN) or down(VK_RWIN):
+        mods |= MOD_WIN
+    return mods
+
+
+def is_modifier_vk(vk: int) -> bool:
+    return vk in _MODIFIER_VKS
+
+
+def hotkey_spec(modifiers: int, vk: int) -> str | None:
+    """(MOD_* flags, vk) -> "ctrl+alt+f12", or None if vk is not a bindable key."""
+    name = _NAME_OF_VK.get(vk)
+    if name is None:
+        return None
+    parts = [n for n, flag in _MOD_ORDER if modifiers & flag]
+    return "+".join(parts + [name])
+
+
+def format_hotkey(spec: str) -> str:
+    """"ctrl+alt+f12" -> "Ctrl+Alt+F12" for display."""
+    out = []
+    for part in (p.strip().lower() for p in spec.split("+") if p.strip()):
+        if part in _DISPLAY_NAMES:
+            out.append(_DISPLAY_NAMES[part])
+        elif len(part) == 1 or (part[0] == "f" and part[1:].isdigit()):
+            out.append(part.upper())
+        elif part.startswith("num") and part[3:].isdigit():
+            out.append("Num " + part[3:])
+        else:
+            out.append(part.capitalize())
+    return "+".join(out)
 
 
 class HotKeyParseError(ValueError):

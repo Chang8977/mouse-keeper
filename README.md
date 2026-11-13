@@ -2,101 +2,78 @@
 
 **English** · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
 
-A tray-resident keep-alive utility for Windows. It makes Windows believe you are
-still at the keyboard, so apps that derive presence from the system idle timer —
-Microsoft Teams being the usual reason people want this — stay marked as
-available.
+A small Windows tray tool that keeps you showing as available. It makes Windows
+believe you are still at the keyboard, so apps that set your status from how
+long the PC has been idle — Microsoft Teams being the usual reason people want
+this — keep you green instead of switching you to "Away".
 
 <img src="docs/screenshot-en.png" alt="Mouse Keeper's tray panel" width="360">
 
-- Pure `ctypes` calls into Win32. No pyautogui, no pynput, no automation stack.
-- Two modes: **Smart** (only moves when you have actually stepped away) and
-  **Always** (moves on a fixed interval).
-- Blocks screen-off and sleep as well.
-- **Stops by itself when the session is locked** and says so, then resumes on unlock.
-- **Stall watchdog**: recovers on its own after sleep / Modern Standby.
-- One-click start-with-Windows.
-- **Hand-drawn Fluent panel**: rounded corners, drop shadow, hover highlight,
-  follows the system light/dark theme, crisp on high-DPI displays.
-- **10 UI languages**, auto-detected from your Windows display language.
-- **Tray icon matches your taskbar theme**, switching automatically if it changes
-  while running.
+- Two modes: **Smart** (only acts once you have actually stepped away) and
+  **Always** (acts on a fixed interval).
+- The cursor does not visibly move, so it never gets in the way of your work.
+- Also keeps the screen on and stops the PC from going to sleep.
+- **Work hours**: switch on and off automatically, e.g. Mon–Fri 09:00–18:00.
+- Pauses itself while the PC is locked and resumes when you unlock.
+- Recovers on its own after sleep.
+- Global hotkey to pause / resume, which you can change from the panel.
+- Optional start with Windows, and a notification when a new version is out.
+- A modern panel that follows the Windows light / dark theme.
+- **10 languages**, picked automatically from your Windows display language.
 
 ---
 
-## Quick start
+## Download and run
 
-**Run from source**
+1. Download `MouseKeeper-<version>-win64.zip` from the
+   [latest release](https://github.com/Chang8977/mouse-keeper/releases/latest).
+2. Unzip it anywhere and run `MouseKeeper\MouseKeeper.exe`.
+3. Nothing pops up — look for the icon in the **system tray** at the bottom
+   right of the taskbar (it may be tucked away behind the `^` arrow).
+   **Left-click** it to start / pause, **right-click** it to open the panel.
 
-```bash
-python -m venv .venv && .venv\Scripts\pip install -r requirements.txt && .venv\Scripts\pythonw main.py
-```
+No installer and no admin rights are needed. If you move the program later,
+move the whole `MouseKeeper` folder, not just the exe.
 
-**Build an exe (recommended)**
+> **"Windows protected your PC"?** The program is not code-signed, so on first
+> launch Microsoft Defender SmartScreen may show this warning. It appears for any
+> download that is new and not yet widely used, not because of anything the
+> program does. Click **More info → Run anyway**. If you would rather not, you can
+> build it yourself from source (below).
 
-```bash
-powershell -ExecutionPolicy Bypass -File build.ps1
-```
-
-The result is `dist\MouseKeeper\MouseKeeper.exe`. Double-click it and the icon
-appears in the system tray. **Move the whole `MouseKeeper` folder if you relocate it.**
-
-`--onedir` (a folder) is the deliberate default rather than `--onefile` (a single
-exe). A onefile build unpacks itself into a temp directory on every launch, and
-that behaviour alone trips antivirus heuristics — it is one of the main reasons
-PyInstaller output gets flagged as a trojan. onedir never unpacks, so false
-positives are far rarer, and it starts faster too. If you really want one file:
-
-```bash
-powershell -ExecutionPolicy Bypass -File build.ps1 -OneFile
-```
-
-**Run the self-check first** (strongly recommended — it verifies the whole
-approach actually works on your machine):
-
-```bash
-.venv\Scripts\python main.py --check
-```
-
-You want to see `+ Self-check passed`. If it fails, `SendInput` is being blocked
-by the system or by security software, and this tool cannot work on that machine.
-
-The self-check always prints in English, whatever the UI language is set to —
-it is a diagnostic meant for whoever is troubleshooting, and it stays ASCII-only
-so that piping its output on a CJK codepage cannot raise `UnicodeEncodeError`.
+Release builds are produced automatically by GitHub Actions from the published
+source code, so the download matches what is in this repository.
 
 ---
 
-## The two modes
+## Using it
+
+### The two modes
 
 | | Smart (default) | Always |
 |---|---|---|
-| Trigger | System has been idle for the threshold (60 s by default) | Every N seconds unconditionally (45 s by default) |
-| While you are using the PC | **Completely silent** — never moves | Keeps moving, occasionally fighting you for the cursor |
-| Use it when | Day-to-day. Pick this unless you have a reason not to | You want fully predictable behaviour, or Smart mode misbehaves |
+| When it acts | After the PC has been idle for the interval (60 s by default) | Every interval, no matter what (45 s by default) |
+| While you are using the PC | Does nothing at all | Keeps acting in the background |
+| Best for | Everyday use — pick this unless you have a reason not to | When you want completely predictable behaviour |
 
-Smart mode has a neat self-consistency to it: the events this tool injects also
-reset the system idle timer, so once you walk away an injection happens exactly
-every `idle_threshold_sec`. The moment you touch the mouse again the idle counter
-keeps resetting on its own and the tool never fires.
-
----
-
-## The panel
+### The panel
 
 Right-click the tray icon:
 
 ```
 ┌──────────────────────────────────────┐
-│  ●  Running                          │  ← click to toggle
+│  ●  Running                          │  ← click to start / pause
 │     Up 12m · 8 moves · idle 23s      │
 ├──────────────────────────────────────┤
 │  Mode                [Smart] Always  │
 │  Interval · sec  30 45 [60] 90 120   │
 │  Auto-stop · hours  Off 2 4 [8] 12   │
+│  ✓ Work hours · Mo–Fr 09:00–18:00    │
 │  ✓ Also block screen-off / sleep     │
 ├──────────────────────────────────────┤
 │    Start with Windows                │
+│    Hotkey · Ctrl+Alt+F12             │
+│  ✓ Check for updates                 │
 │    Write log file                    │
 │    Language · English                │
 │    Open config folder                │
@@ -105,250 +82,183 @@ Right-click the tray icon:
 └──────────────────────────────────────┘
 ```
 
-| Item | Notes |
+| Item | What it does |
 |---|---|
-| Status card | The badge shows running / paused / locked. Click to toggle; left-clicking the tray icon does the same |
-| Mode | Smart / Always |
+| Status card | Shows running / paused / locked, or "Off hours" with the next start time. Click to start or pause |
+| Mode | Smart / Always (see above) |
 | Interval | 30 / 45 / 60 / 90 / 120 / 180 seconds |
-| Auto-stop | Off / 2 / 4 / 8 / 12 hours, stops on its own and shows a notification |
-| Also block screen-off / sleep | Maps to `SetThreadExecutionState` |
-| Start with Windows | Writes `HKCU\...\Run`. No admin rights needed |
-| Write log file | Goes to `%APPDATA%\MouseKeeper\mouse-keeper.log` |
-| Language | Opens a second page listing all 10 languages |
-| Open config folder | Opens `%APPDATA%\MouseKeeper\` |
-| Quit | Saves the config and exits |
+| Auto-stop | Stops by itself after 2 / 4 / 8 / 12 hours and lets you know. Off = never |
+| Work hours | Opens a page to switch the schedule on, choose the days and set the start / end time |
+| Also block screen-off / sleep | Keeps the screen on and stops the PC from sleeping while running |
+| Start with Windows | Starts Mouse Keeper when you sign in |
+| Hotkey | Click, then press the new key combination. `Esc` cancels, `Backspace` turns the hotkey off |
+| Check for updates | Lets you know when a new version is out (see [Privacy](#privacy)) |
+| Write log file | Keeps a log for troubleshooting |
+| Language | Choose from the 10 languages |
+| Open config folder | Opens the folder holding the settings file |
+| Quit | Saves the settings and exits |
 
-Changing a setting **does not close the panel**, so you can adjust several in a
-row. Only the toggle and the action rows dismiss it.
+Changing a setting keeps the panel open, so you can adjust several in a row.
 
-The tray icon has three states: **green arrow** (running), **grey pause**
-(paused), **amber padlock** (locked).
+The tray icon shows the current state: **green arrow** (running), **grey pause**
+(paused), **amber padlock** (PC locked).
 
-**Global hotkey `Ctrl+Alt+F12`** pauses / resumes at any time — handy when you
-are about to hand over your screen. It can be changed in the config file, e.g.
-`"ctrl+shift+f9"`.
+### Hotkey
 
----
+`Ctrl+Alt+F12` pauses / resumes at any time — handy right before you share your
+screen. To change it, click the **Hotkey** row in the panel and press the new
+combination. It has to include `Ctrl`, `Alt` or `Win`, so it cannot get in the
+way of normal typing (function keys also work with `Shift`, and `F13`–`F24` on
+their own). If another program already uses that combination, you get a
+notification and the old hotkey stays.
 
-## Languages
+### Work hours
+
+Turn on **Run only during work hours** on the Work hours page and Mouse Keeper
+starts by itself when your work hours begin and pauses when they end, with a
+notification each time.
+
+- It only steps in at those two moments. You can still pause it for lunch or
+  switch it on for an evening call, and that stays until the next start or end
+  time.
+- Started outside work hours, it waits, paused, until the next start time.
+- An end time earlier than the start time runs past midnight, e.g.
+  22:00–06:00 for a night shift.
+- Auto-stop still applies as well.
+
+### Languages
 
 English, 简体中文, 繁體中文, 日本語, 한국어, Deutsch, Français, Español,
-Português, Русский.
-
-The default is `auto`, which reads your Windows display language via
-`GetUserDefaultLocaleName` and falls back to English when there is no match.
-Chinese resolves to Traditional for `-TW` / `-HK` / `-MO` / `Hant` tags and to
-Simplified otherwise.
-
-The font follows the language rather than being fixed globally — YaHei has no
-Hangul and Segoe UI has no CJK ideographs, so a single font would render tofu
-boxes in some languages.
-
-Log-file messages are always written in English regardless of the UI language.
-Logs exist for troubleshooting, and a single log shouldn't end up half in one
-language and half in another because someone changed a setting midway.
+Português, Русский. By default it follows your Windows display language and
+falls back to English; you can change it any time from the panel.
 
 ---
 
-## Configuration
+## Settings file
 
-`%APPDATA%\MouseKeeper\config.json`. Restart to apply manual edits; anything you
-can reach from the panel is saved immediately.
+Everything in the panel is saved automatically to
+`%APPDATA%\MouseKeeper\config.json` (**Open config folder** takes you there).
+You only need to edit the file for the few options the panel does not show;
+restart Mouse Keeper afterwards.
 
-| Key | Default | Notes |
+| Key | Default | Meaning |
 |---|---|---|
-| `mode` | `"smart"` | `smart` / `force` |
-| `idle_threshold_sec` | `60` | Smart mode: idle seconds before moving (10–280) |
-| `interval_sec` | `45` | Always mode: fixed interval (5–280) |
-| `move_pixels` | `1` | Pixels per move (moved straight back afterwards) |
-| `keep_display_on` | `true` | Also block screen-off |
+| `mode` | `"smart"` | `smart` / `force` (Always) |
+| `idle_threshold_sec` | `60` | Smart mode interval, 10–280 seconds |
+| `interval_sec` | `45` | Always mode interval, 5–280 seconds |
+| `move_pixels` | `1` | How far each tiny movement goes (it is undone immediately) |
+| `keep_display_on` | `true` | Also keep the screen on and the PC awake |
 | `auto_stop_hours` | `8.0` | Stop after this many hours, `0` = never |
 | `language` | `"auto"` | `auto` or a language code such as `ja`, `de`, `zh-Hans` |
-| `hotkey` | `"ctrl+alt+f12"` | Global pause / resume |
-| `start_active` | `true` | Begin keeping alive right after launch |
+| `hotkey` | `"ctrl+alt+f12"` | Pause / resume hotkey, `""` = none |
+| `schedule_enabled` | `false` | Follow the work-hours schedule |
+| `schedule_days` | `[0,1,2,3,4]` | Days it covers, Monday = `0` … Sunday = `6` |
+| `schedule_start` | `"09:00"` | Work hours begin (`HH:MM`) |
+| `schedule_end` | `"18:00"` | Work hours end; earlier than the start = past midnight |
+| `check_updates` | `true` | Look for new versions |
+| `start_active` | `true` | Start keeping you active right after launch (ignored while work hours are on) |
 | `log_enabled` | `false` | Write a log file |
 
-The 280-second ceiling exists because Teams marks you away after roughly five
-minutes (300 s) without input; a cadence has to be comfortably below that to mean
-anything.
+Intervals stop at 280 seconds because Teams switches you to "Away" after about
+five minutes without input.
 
 ---
 
 ## How it works
 
-```
-every 1 s (dedicated thread, not a message timer)
-  ├─ SetThreadExecutionState(ES_CONTINUOUS|ES_SYSTEM_REQUIRED[|ES_DISPLAY_REQUIRED])
-  │     → blocks screen-off / sleep
-  ├─ OpenInputDesktop() to detect a locked session → skip this tick if locked
-  ├─ Smart mode: GetLastInputInfo() — has idle time reached the threshold?
-  │   Always mode: has enough time passed since the last move?
-  └─ if so → SendInput(MOUSEEVENTF_MOVE, +1px) → wait 50 ms → SendInput(-1px)
-        → the system "last input time" is refreshed, cursor lands exactly where it was
+Every so often Mouse Keeper sends Windows a one-pixel mouse movement and moves
+straight back, so the pointer stays exactly where it was. To Windows that counts
+as real input, which resets the idle timer that Teams and similar apps watch.
 
-At the end of every tick two clocks (monotonic and wall) are compared.
-If the tick really took ≥10 s, the machine was frozen or asleep:
-re-assert the power request and inject once immediately.
-```
+This is also why tools that only stop the PC from sleeping are not enough: they
+keep the screen on, but they do not count as input, so you still go "Away".
 
-Three things that matter:
+---
 
-1. **It has to be `SendInput`, not `SetCursorPos`.** The latter only relocates
-   the cursor; it produces no input event, so the timestamp behind
-   `GetLastInputInfo` never updates and Teams goes away anyway. This is the most
-   common way to get this wrong.
-2. **Tools like PowerToys Awake are not enough.** They call
-   `SetThreadExecutionState`, which blocks sleep but **generates no input**, so it
-   does nothing for the away-status problem. Blocking sleep and blocking "away"
-   are two separate jobs; this tool does both.
-3. **Movement is relative and cancels out**, so the cursor sits exactly where it
-   was before and nothing you are doing gets disturbed.
+## Privacy
 
-### Why the tray menu is hand-drawn
-
-A Windows tray menu is normally a native HMENU (`CreatePopupMenu` +
-`TrackPopupMenuEx`) drawn by the OS. The OS only accepts semantic flags —
-checked, disabled, radio, separator — and offers **no owner-draw hook**, so
-rounded corners, padding and hover highlights are all out of reach. `pystray`
-takes exactly that route, which is why the whole tray layer here is custom:
-
-- `trayicon.py` — `Shell_NotifyIcon` plus a hidden message window, handling the
-  clicks itself
-- `menu.py` — an `overrideredirect` tkinter window with the entire panel painted
-  onto one Canvas; the window's rounded corners and shadow come from DWM
-  (`DWMWA_WINDOW_CORNER_PREFERENCE`)
-
-**There are no cascading submenus.** Mode, interval and auto-stop are inline
-segmented controls. Cascading menus force the pointer to travel diagonally across
-other rows to reach the submenu — a long path that is easy to slide off, the
-classic Fitts / Steering Law pain point. Segmented controls collapse three clicks
-into one.
-
-**There is no progress animation either.** The status card carries a plain
-coloured badge with a white glyph, the same visual language as the tray icon. A
-moving progress ring has to be repainted every second, which is the single most
-likely thing to develop rendering artefacts, and what it tells you (seconds until
-the next move) is not worth that.
-
-Panel refreshes follow the same principle: `Panel.refresh()` first compares a
-signature of everything that should currently be on screen and skips entirely if
-nothing changed. The only thing that actually moves is one line of detail text,
-and once per second is plenty.
-
-Threading model: **all UI lives on the main thread.** tkinter's mainloop runs
-there, tray messages are drained by `pump()` from an `after` loop, and the
-keep-alive engine runs on a background thread that only mutates data — when the
-UI needs updating it sets a flag that the main-thread timer picks up.
-
-Three traps worth knowing about, all documented in the code:
-
-1. `SetProcessDpiAwarenessContext` takes a **pointer-sized** handle. Passing
-   Python's `-4` makes ctypes marshal a 32-bit int, and on 64-bit the call fails
-   **silently** — no error, no bad return value, but the process stays DPI-unaware
-   and the whole UI gets bitmap-stretched into a blur on a high-DPI display.
-2. `PeekMessage` inside `pump()` **must filter on our own hwnd**. Passing `None`
-   drains the entire thread queue, tkinter's messages included, and
-   `DispatchMessage` outside Tk's notifier does not produce the corresponding Tk
-   events — mouse input just vanishes.
-3. When the pointer crosses into a window, Tk delivers `<Enter>` but not
-   `<Motion>`. Binding only `<Motion>` means a row the mouse is resting on never
-   highlights until you jiggle the mouse.
-
-Windows 10 has no `DWMWA_WINDOW_CORNER_PREFERENCE`, so the window falls back to
-square corners. Nothing else is affected.
-
-### Two icon sets, one per taskbar theme
-
-The tray icon ships as two complete artwork sets in `assets/tray/light/` and
-`assets/tray/dark/` (`running` / `paused` / `locked` each). They are not a
-light-mode default with a dark-mode fallback — each is drawn for contrast
-against one specific taskbar colour, and using the wrong one is what makes an
-icon go illegible rather than just look slightly off: the `light` set's cursor
-is near-black for a light taskbar, the `dark` set's is near-white for a dark
-one.
-
-Windows exposes the taskbar's theme independently of the per-app theme that
-drives the panel's own colours — `SystemUsesLightTheme` versus
-`AppsUseLightTheme`, both under
-`HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`. Settings >
-Personalization > Colors > Custom lets a user set "Default Windows mode" (the
-taskbar) and "Default app mode" (window chrome) differently, so the two are
-read separately in `winui.py` and the tray icon reacts to its own signal rather
-than piggybacking on the panel's.
-
-### Why the main loop avoids message timers
-
-`arkane-systems/mousejiggler#130` is an open report about a nasty case: on Modern
-Standby (S0 low-power idle) laptops, once the display turns off the `WM_TIMER`
-messages that `System.Windows.Forms.Timer` depends on stop being delivered and the
-jiggler stalls **permanently** — the process is still alive but never moves again.
-
-This project's main loop is a dedicated thread with `Event.wait()`, so it is
-immune to that. The same report also notes that `SetThreadExecutionState()` may
-never register as a system power request on such machines, which is why the stall
-watchdog exists: the moment a tick takes far longer than it should, the power
-request is re-asserted and an injection is fired immediately.
-
-`powercfg /a` tells you whether your machine is a Modern Standby one.
+Checking for updates is the only time Mouse Keeper goes online: one request to
+GitHub about 20 seconds after it starts, then once a day, asking which version
+is the latest. Nothing else is sent apart from what every web request includes
+(your IP address and the program's name and version). It never downloads or
+installs anything by itself — it only tells you a new version exists. Untick
+**Check for updates** to turn it off completely.
 
 ---
 
 ## Known limits
 
-- **Keep-alive cannot work while the session is locked.** After `Win+L` or on the
-  secure desktop, the input desktop belongs to Winlogon and `SendInput` cannot
-  land. The tool detects this, stops, shows "Locked" in the tray, and resumes on
-  unlock — but **your status will drop during the lock**. There is no way around
-  that.
-- **Elevated windows block it.** When the foreground window runs as
-  administrator, UIPI rejects `SendInput` from a non-elevated process (visible in
-  the log). That is Windows working as designed, not a bug.
-- **Disconnected RDP sessions** are suspended and get treated as "locked" too.
-- **Antivirus false positives.** PyInstaller output being misread as a trojan is
-  common and has nothing to do with what this project does. The default onedir
-  build keeps the odds as low as possible, but corporate EDR judges things very
-  differently from consumer antivirus. If it gets blocked, just run from source
-  (`pythonw main.py`).
-- Windows only — it is Win32 API from top to bottom.
+- **It cannot keep you active while the PC is locked.** Once you press `Win+L`,
+  Windows does not accept input from programs, so your status will go "Away"
+  during the lock. Mouse Keeper notices, shows "Locked", and carries on as soon
+  as you unlock.
+- **Windows running as administrator get in the way.** While such a window is in
+  front, Windows blocks the input. This is a Windows security rule, not a bug.
+- **Disconnected Remote Desktop sessions** are treated the same as a locked PC.
+- **Antivirus warnings.** Some antivirus programs, especially on company PCs,
+  wrongly flag small unsigned programs like this one. If yours blocks it, you can
+  run it from source instead (below).
+- Windows only.
 
 ---
 
 ## Please check this first
 
-Teams presence is meant to reflect real availability. At some companies, using a
-tool to keep it green is against IT or HR policy, and on a machine managed with
-Intune or an EDR agent, input injection is typically auditable. This tool has no
-features for evading corporate monitoring and will not gain any. Decide for
-yourself whether it is appropriate where you work.
+Your Teams status is meant to show whether you are really available. At some
+companies, keeping it green with a tool like this goes against IT or HR policy,
+and on company-managed PCs this kind of input can usually be seen by IT. Mouse
+Keeper has no features for hiding from company monitoring and never will.
+Decide for yourself whether it is appropriate where you work.
 
 ---
 
-## Project layout
+## Running from source
 
-```
-mouse-keeper/
-├── main.py                  entry point + --check self-test
-├── mouse_keeper/
-│   ├── winapi.py            SendInput / GetLastInputInfo / power / lock probe / hotkey
-│   ├── winui.py             DPI awareness / DWM corners / system theme / HICON
-│   ├── trayicon.py          Shell_NotifyIcon tray icon + hidden message window
-│   ├── menu.py              hand-drawn Fluent panel
-│   ├── i18n.py              UI strings for 10 languages + language detection
-│   ├── config.py            config read/write and validation
-│   ├── engine.py            keep-alive loop (background thread + stall watchdog)
-│   ├── autostart.py         start with Windows (HKCU Run entry)
-│   ├── icon.py              tray icons loaded from assets/tray, exported as .ico
-│   └── tray.py              the App that wires all of the above together
-├── assets/tray/             tray-icon source PNGs (light/ and dark/ taskbar variants)
-├── build.ps1                PyInstaller build script (-OneFile for a single file)
-└── requirements.txt         Pillow only — the UI is tkinter, from the stdlib
+You need **Python 3.10 or newer** (tick "Add python.exe to PATH" when installing
+it) and Git. The commands below work in PowerShell, Command Prompt and Windows
+Terminal.
+
+```bash
+git clone https://github.com/Chang8977/mouse-keeper.git
 ```
 
-> `build.ps1` is stored as **UTF-8 with BOM**. Windows PowerShell 5.1 decodes a
-> BOM-less `.ps1` using the system ANSI codepage, which mangles non-ASCII text and
-> can break quote pairing badly enough that the script fails to parse.
->
-> Code comments and documentation are both in English.
+```bash
+cd mouse-keeper
+```
+
+**Option A — build your own exe (recommended)**
+
+```bash
+powershell -ExecutionPolicy Bypass -File build.ps1
+```
+
+This sets everything up by itself the first time. The result is
+`dist\MouseKeeper\MouseKeeper.exe`.
+
+**Option B — run the source directly**
+
+```bash
+python -m venv .venv
+```
+
+```bash
+.venv\Scripts\pip install -r requirements.txt
+```
+
+```bash
+.venv\Scripts\pythonw main.py
+```
+
+**Self-check.** To make sure the approach works on your PC (useful on a company
+machine), run this after either option:
+
+```bash
+.venv\Scripts\python main.py --check
+```
+
+`+ Self-check passed` means you are good to go. If it fails, the PC or its
+security software is blocking the simulated input and Mouse Keeper cannot work
+there.
 
 ---
 
